@@ -1,7 +1,7 @@
 import sqlite3
 from datetime import datetime, timedelta
 from contextlib import contextmanager
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
 class Database:
     def __init__(self, db_name='finance_tracker.db'):
@@ -25,7 +25,7 @@ class Database:
     def _initialize_database(self):
         """Create all necessary tables."""
         with self.get_connection() as conn:
-            # Main transactions table
+            # Income/Expense transactions
             conn.execute('''
                 CREATE TABLE IF NOT EXISTS transactions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -38,7 +38,7 @@ class Database:
                 )
             ''')
             
-            # Borrow/Lend tracking table
+            # Borrow/Lend tracking with enhanced fields
             conn.execute('''
                 CREATE TABLE IF NOT EXISTS debt_tracking (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,71 +47,129 @@ class Database:
                     amount REAL NOT NULL,
                     contact_name TEXT NOT NULL,
                     purpose TEXT,
-                    is_settled INTEGER DEFAULT 0,
+                    status TEXT DEFAULT 'pending',
+                    borrow_date DATE,
+                    return_date DATE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            # User settings for notifications
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS user_settings (
+                    user_id INTEGER PRIMARY KEY,
+                    daily_report BOOLEAN DEFAULT 1,
+                    report_time TEXT DEFAULT '06:00',
+                    timezone TEXT DEFAULT 'Asia/Kolkata',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
             
-            # Indexes for performance
+            # Indexes
             conn.execute('CREATE INDEX IF NOT EXISTS idx_trans_user_date ON transactions(user_id, created_at)')
-            conn.execute('CREATE INDEX IF NOT EXISTS idx_debt_user_status ON debt_tracking(user_id, is_settled)')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_debt_user_status ON debt_tracking(user_id, status)')
     
     # ========== Transaction Operations ==========
     
-    def record_salary(self, user_id: int, amount: float) -> None:
-        """Record salary income."""
+    def record_income(self, user_id: int, amount: float, category: str = 'salary', description: str = '') -> None:
+        """Record any type of income."""
         with self.get_connection() as conn:
             conn.execute(
-                'INSERT INTO transactions (user_id, trans_type, amount) VALUES (?, ?, ?)',
-                (user_id, 'salary', amount)
+                'INSERT INTO transactions (user_id, trans_type, amount, category, description) VALUES (?, ?, ?, ?, ?)',
+                (user_id, 'income', amount, category, description)
             )
     
     def record_expense(self, user_id: int, amount: float, category: str, description: str = '') -> None:
-        """Record an expense with category."""
+        """Record an expense."""
         with self.get_connection() as conn:
             conn.execute(
                 'INSERT INTO transactions (user_id, trans_type, amount, category, description) VALUES (?, ?, ?, ?, ?)',
                 (user_id, 'expense', amount, category, description)
             )
     
-    def record_savings(self, user_id: int, amount: float) -> None:
-        """Record money moved to savings."""
-        with self.get_connection() as conn:
-            conn.execute(
-                'INSERT INTO transactions (user_id, trans_type, amount) VALUES (?, ?, ?)',
-                (user_id, 'savings', amount)
-            )
+    # ========== Enhanced Borrow/Lend Operations ==========
     
-    # ========== Borrow/Lend Operations ==========
-    
-    def record_borrowed(self, user_id: int, amount: float, from_person: str, purpose: str = '') -> None:
+    def add_borrowed_money(self, user_id: int, amount: float, from_person: str, purpose: str = '', 
+                          borrow_date: str = None) -> int:
         """Record money borrowed from someone."""
+        if not borrow_date:
+            borrow_date = datetime.now().date().isoformat()
+        
         with self.get_connection() as conn:
-            conn.execute(
-                'INSERT INTO debt_tracking (user_id, debt_type, amount, contact_name, purpose) VALUES (?, ?, ?, ?, ?)',
-                (user_id, 'borrowed', amount, from_person, purpose)
+            cursor = conn.execute(
+                '''INSERT INTO debt_tracking (user_id, debt_type, amount, contact_name, purpose, 
+                   status, borrow_date) VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                (user_id, 'borrowed', amount, from_person, purpose, 'pending', borrow_date)
             )
+            return cursor.lastrowid
     
-    def record_lent(self, user_id: int, amount: float, to_person: str, purpose: str = '') -> None:
+    def add_lent_money(self, user_id: int, amount: float, to_person: str, purpose: str = '',
+                      lend_date: str = None) -> int:
         """Record money lent to someone."""
+        if not lend_date:
+            lend_date = datetime.now().date().isoformat()
+        
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                '''INSERT INTO debt_tracking (user_id, debt_type, amount, contact_name, purpose, 
+                   status, borrow_date) VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                (user_id, 'lent', amount, to_person, purpose, 'pending', lend_date)
+            )
+            return cursor.lastrowid
+    
+    def mark_money_received(self, user_id: int, debt_id: int, received_date: str = None) -> bool:
+        """Mark borrowed money as received back."""
+        if not received_date:
+            received_date = datetime.now().date().isoformat()
+        
         with self.get_connection() as conn:
             conn.execute(
-                'INSERT INTO debt_tracking (user_id, debt_type, amount, contact_name, purpose) VALUES (?, ?, ?, ?, ?)',
-                (user_id, 'lent', amount, to_person, purpose)
+                '''UPDATE debt_tracking SET status = ?, return_date = ?, updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ? AND user_id = ? AND debt_type = 'lent' ''',
+                ('settled', received_date, debt_id, user_id)
             )
+            return True
     
-    def record_debt_settlement(self, user_id: int, amount: float, contact: str, purpose: str = '') -> None:
-        """Record money received back or debt repayment."""
+    def mark_money_returned(self, user_id: int, debt_id: int, return_date: str = None) -> bool:
+        """Mark lent money as returned."""
+        if not return_date:
+            return_date = datetime.now().date().isoformat()
+        
         with self.get_connection() as conn:
             conn.execute(
-                'INSERT INTO debt_tracking (user_id, debt_type, amount, contact_name, purpose, is_settled) VALUES (?, ?, ?, ?, ?, ?)',
-                (user_id, 'settlement', amount, contact, purpose, 1)
+                '''UPDATE debt_tracking SET status = ?, return_date = ?, updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ? AND user_id = ? AND debt_type = 'borrowed' ''',
+                ('settled', return_date, debt_id, user_id)
             )
+            return True
     
-    # ========== Report Generation ==========
+    def get_pending_borrows(self, user_id: int) -> List[sqlite3.Row]:
+        """Get all pending borrowed money entries."""
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                '''SELECT * FROM debt_tracking 
+                   WHERE user_id = ? AND debt_type = 'borrowed' AND status = 'pending'
+                   ORDER BY borrow_date DESC''',
+                (user_id,)
+            )
+            return cursor.fetchall()
+    
+    def get_pending_lends(self, user_id: int) -> List[sqlite3.Row]:
+        """Get all pending lent money entries."""
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                '''SELECT * FROM debt_tracking 
+                   WHERE user_id = ? AND debt_type = 'lent' AND status = 'pending'
+                   ORDER BY borrow_date DESC''',
+                (user_id,)
+            )
+            return cursor.fetchall()
+    
+    # ========== Advanced Reports ==========
     
     def get_today_summary(self, user_id: int) -> str:
-        """Generate today's financial summary."""
+        """Get today's financial summary."""
         today = datetime.now().date()
         
         with self.get_connection() as conn:
@@ -127,119 +185,126 @@ class Database:
         if not data:
             return "📅 *Today's Summary*\n\n❌ No transactions recorded yet today."
         
-        salary = data.get('salary', {}).get('total', 0)
+        income = data.get('income', {}).get('total', 0)
         expenses = data.get('expense', {}).get('total', 0)
-        savings = data.get('savings', {}).get('total', 0)
         expense_count = data.get('expense', {}).get('count', 0)
         
-        net_balance = salary - expenses - savings
+        net_balance = income - expenses
         
         return f"""📅 *Today's Summary*
 📆 {today.strftime('%d %B %Y')}
 
-💰 Income: ₹{salary:,.2f}
+💰 Income: ₹{income:,.2f}
 💸 Expenses: ₹{expenses:,.2f} ({expense_count} transactions)
-🏦 Savings: ₹{savings:,.2f}
 {'━' * 25}
-💵 Net Balance: ₹{net_balance:,.2f}"""
+💵 Net: ₹{net_balance:,.2f}"""
     
-    def get_monthly_overview(self, user_id: int) -> str:
-        """Generate current month's overview."""
-        today = datetime.now()
-        month_start = today.replace(day=1).date()
+    def get_yesterday_report(self, user_id: int) -> str:
+        """Get yesterday's complete report."""
+        yesterday = (datetime.now() - timedelta(days=1)).date()
         
         with self.get_connection() as conn:
             cursor = conn.execute('''
                 SELECT trans_type, SUM(amount) as total, COUNT(*) as count
                 FROM transactions
-                WHERE user_id = ? AND DATE(created_at) >= ?
+                WHERE user_id = ? AND DATE(created_at) = ?
                 GROUP BY trans_type
-            ''', (user_id, month_start))
+            ''', (user_id, yesterday))
             
             data = {row['trans_type']: {'total': row['total'], 'count': row['count']} for row in cursor.fetchall()}
+            
+            # Get expense details
+            cursor = conn.execute('''
+                SELECT category, SUM(amount) as total
+                FROM transactions
+                WHERE user_id = ? AND DATE(created_at) = ? AND trans_type = 'expense'
+                GROUP BY category
+                ORDER BY total DESC
+            ''', (user_id, yesterday))
+            
+            categories = cursor.fetchall()
         
         if not data:
-            return f"📊 *Monthly Overview - {today.strftime('%B %Y')}*\n\n❌ No transactions this month."
+            return f"📅 *Yesterday's Report*\n📆 {yesterday.strftime('%d %B %Y')}\n\n❌ No transactions recorded."
         
-        salary = data.get('salary', {}).get('total', 0)
+        income = data.get('income', {}).get('total', 0)
         expenses = data.get('expense', {}).get('total', 0)
-        savings = data.get('savings', {}).get('total', 0)
         expense_count = data.get('expense', {}).get('count', 0)
         
-        net_balance = salary - expenses - savings
-        savings_rate = (savings / salary * 100) if salary > 0 else 0
+        net = income - expenses
         
-        return f"""📊 *Monthly Overview*
-📆 {today.strftime('%B %Y')}
+        report = f"""📅 *Yesterday's Report*
+📆 {yesterday.strftime('%d %B %Y')}
 
-💰 Total Income: ₹{salary:,.2f}
+💰 Total Income: ₹{income:,.2f}
 💸 Total Expenses: ₹{expenses:,.2f} ({expense_count} items)
-🏦 Total Savings: ₹{savings:,.2f}
 {'━' * 25}
-💵 Net Balance: ₹{net_balance:,.2f}
-📈 Savings Rate: {savings_rate:.1f}%"""
+💵 Net Balance: ₹{net:,.2f}
+"""
+        
+        if categories:
+            report += "\n📊 *Expense Breakdown:*\n"
+            for cat in categories:
+                category = cat['category'] or 'other'
+                report += f"  • {category.title()}: ₹{cat['total']:,.2f}\n"
+        
+        return report.strip()
     
-    def get_complete_monthly_report(self, user_id: int) -> str:
-        """Comprehensive monthly report with date-wise and category-wise breakdown."""
-        today = datetime.now()
-        month_start = today.replace(day=1).date()
+    def get_monthly_statement(self, user_id: int, month: int = None, year: int = None) -> str:
+        """Get monthly financial statement."""
+        if not month or not year:
+            today = datetime.now()
+            month, year = today.month, today.year
+        
+        month_start = datetime(year, month, 1).date()
+        if month == 12:
+            month_end = datetime(year + 1, 1, 1).date()
+        else:
+            month_end = datetime(year, month + 1, 1).date()
         
         with self.get_connection() as conn:
-            # Overall totals
             cursor = conn.execute('''
-                SELECT trans_type, SUM(amount) as total
+                SELECT trans_type, SUM(amount) as total, COUNT(*) as count
                 FROM transactions
-                WHERE user_id = ? AND DATE(created_at) >= ?
+                WHERE user_id = ? AND DATE(created_at) >= ? AND DATE(created_at) < ?
                 GROUP BY trans_type
-            ''', (user_id, month_start))
-            totals = {row['trans_type']: row['total'] for row in cursor.fetchall()}
+            ''', (user_id, month_start, month_end))
             
-            # Daily expenses
-            cursor = conn.execute('''
-                SELECT DATE(created_at) as day, SUM(amount) as total, COUNT(*) as count
-                FROM transactions
-                WHERE user_id = ? AND trans_type = 'expense' AND DATE(created_at) >= ?
-                GROUP BY DATE(created_at)
-                ORDER BY DATE(created_at) DESC
-            ''', (user_id, month_start))
-            daily_expenses = cursor.fetchall()
+            data = {row['trans_type']: {'total': row['total'], 'count': row['count']} for row in cursor.fetchall()}
             
             # Category breakdown
             cursor = conn.execute('''
                 SELECT category, SUM(amount) as total, COUNT(*) as count
                 FROM transactions
-                WHERE user_id = ? AND trans_type = 'expense' AND DATE(created_at) >= ?
+                WHERE user_id = ? AND trans_type = 'expense' 
+                AND DATE(created_at) >= ? AND DATE(created_at) < ?
                 GROUP BY category
                 ORDER BY total DESC
-            ''', (user_id, month_start))
+            ''', (user_id, month_start, month_end))
+            
             categories = cursor.fetchall()
         
-        if not totals:
-            return f"📅 *Complete Monthly Report*\n\n❌ No data available for {today.strftime('%B %Y')}."
+        if not data:
+            return f"📊 *Monthly Statement - {month_start.strftime('%B %Y')}*\n\n❌ No data available."
         
-        salary = totals.get('salary', 0)
-        total_expenses = totals.get('expense', 0)
-        savings = totals.get('savings', 0)
-        remaining = salary - total_expenses - savings
+        income = data.get('income', {}).get('total', 0)
+        expenses = data.get('expense', {}).get('total', 0)
+        expense_count = data.get('expense', {}).get('count', 0)
         
-        report = f"""📅 *Monthly Expense Report*
-📆 {today.strftime('%B %Y')}
+        net = income - expenses
+        savings_rate = (net / income * 100) if income > 0 else 0
+        
+        report = f"""📊 *Monthly Statement*
+📆 {month_start.strftime('%B %Y')}
 
-💰 Total Income: ₹{salary:,.2f}
-💸 Total Spent: ₹{total_expenses:,.2f}
-🏦 Savings: ₹{savings:,.2f}
-💵 Remaining: ₹{remaining:,.2f}
+💰 Total Income: ₹{income:,.2f}
+💸 Total Expenses: ₹{expenses:,.2f} ({expense_count} items)
+{'━' * 25}
+💵 Net Savings: ₹{net:,.2f}
+📈 Savings Rate: {savings_rate:.1f}%
 
-{'━' * 30}
-
-📊 *Date-wise Spending*
+📊 *Category-wise Expenses:*
 """
-        
-        for row in daily_expenses[:10]:  # Show last 10 days
-            day_obj = datetime.strptime(row['day'], '%Y-%m-%d')
-            report += f"\n📅 {day_obj.strftime('%d %b')}: ₹{row['total']:,.2f} ({row['count']} items)"
-        
-        report += f"\n\n{'━' * 30}\n\n📈 *Category-wise Expenses*\n"
         
         category_icons = {
             'food': '🍔', 'transport': '🚗', 'bills': '🏠',
@@ -247,183 +312,159 @@ class Database:
             'education': '📚', 'other': '📦'
         }
         
-        for row in categories:
-            cat = row['category'] or 'other'
-            icon = category_icons.get(cat, '📦')
-            percentage = (row['total'] / total_expenses * 100) if total_expenses > 0 else 0
-            report += f"\n{icon} {cat.title()}: ₹{row['total']:,.2f} ({percentage:.1f}%)"
-        
-        return report
-    
-    def get_last_30_days_statement(self, user_id: int) -> str:
-        """Mini statement showing last 30 days of transactions."""
-        cutoff_date = (datetime.now() - timedelta(days=30)).date()
-        
-        with self.get_connection() as conn:
-            cursor = conn.execute('''
-                SELECT trans_type, amount, category, description, created_at
-                FROM transactions
-                WHERE user_id = ? AND DATE(created_at) >= ?
-                ORDER BY created_at DESC
-                LIMIT 30
-            ''', (user_id, cutoff_date))
-            
-            transactions = cursor.fetchall()
-        
-        if not transactions:
-            return "📝 *Mini Statement (Last 30 Days)*\n\n❌ No transactions found."
-        
-        report = "📝 *Mini Statement*\n_Last 30 Days Activity_\n\n"
-        
-        type_icons = {'salary': '💰', 'expense': '💸', 'savings': '🏦'}
-        
-        for trans in transactions:
-            trans_time = datetime.strptime(trans['created_at'], '%Y-%m-%d %H:%M:%S')
-            icon = type_icons.get(trans['trans_type'], '💵')
-            
-            if trans['trans_type'] == 'expense' and trans['category']:
-                detail = f" ({trans['category']})"
-            else:
-                detail = ""
-            
-            desc = f" - {trans['description']}" if trans['description'] else ""
-            
-            report += f"{icon} *{trans['trans_type'].title()}*: ₹{trans['amount']:,.2f}{detail}{desc}\n"
-            report += f"   _{trans_time.strftime('%d %b, %I:%M %p')}_\n\n"
+        for cat in categories:
+            category = cat['category'] or 'other'
+            icon = category_icons.get(category, '📦')
+            percentage = (cat['total'] / expenses * 100) if expenses > 0 else 0
+            report += f"{icon} {category.title()}: ₹{cat['total']:,.2f} ({percentage:.1f}%)\n"
         
         return report.strip()
     
-    def get_daily_expense_breakdown(self, user_id: int) -> str:
-        """Show daily expenses for current month."""
-        month_start = datetime.now().replace(day=1).date()
-        
-        with self.get_connection() as conn:
-            cursor = conn.execute('''
-                SELECT DATE(created_at) as day, SUM(amount) as total, COUNT(*) as count
-                FROM transactions
-                WHERE user_id = ? AND trans_type = 'expense' AND DATE(created_at) >= ?
-                GROUP BY DATE(created_at)
-                ORDER BY DATE(created_at) DESC
-            ''', (user_id, month_start))
-            
-            daily_data = cursor.fetchall()
-        
-        if not daily_data:
-            return "💸 *Daily Expenses*\n\n❌ No expenses recorded this month."
-        
-        report = f"💸 *Daily Expenses*\n📆 {datetime.now().strftime('%B %Y')}\n\n"
-        
-        total_spent = 0
-        for row in daily_data:
-            day_obj = datetime.strptime(row['day'], '%Y-%m-%d')
-            report += f"📅 {day_obj.strftime('%d %b (%a)')}: ₹{row['total']:,.2f} ({row['count']} items)\n"
-            total_spent += row['total']
-        
-        avg_daily = total_spent / len(daily_data) if daily_data else 0
-        
-        report += f"\n{'━' * 25}\n"
-        report += f"💰 Total: ₹{total_spent:,.2f}\n"
-        report += f"📊 Avg/Day: ₹{avg_daily:,.2f}"
-        
-        return report
-    
-    def get_category_analysis(self, user_id: int) -> str:
-        """Analyze spending by category."""
-        month_start = datetime.now().replace(day=1).date()
-        
-        with self.get_connection() as conn:
-            cursor = conn.execute('''
-                SELECT category, SUM(amount) as total, COUNT(*) as count, AVG(amount) as avg
-                FROM transactions
-                WHERE user_id = ? AND trans_type = 'expense' AND DATE(created_at) >= ?
-                GROUP BY category
-                ORDER BY total DESC
-            ''', (user_id, month_start))
-            
-            categories = cursor.fetchall()
-        
-        if not categories:
-            return "📈 *Spending Analysis*\n\n❌ No expense data available."
-        
-        total_expenses = sum(row['total'] for row in categories)
-        
-        report = f"📈 *Spending Analysis*\n📆 {datetime.now().strftime('%B %Y')}\n\n"
-        
-        icons = {
-            'food': '🍔', 'transport': '🚗', 'bills': '🏠',
-            'shopping': '🛍️', 'health': '💊', 'entertainment': '🎬',
-            'education': '📚', 'other': '📦'
-        }
-        
-        for row in categories:
-            cat = row['category'] or 'other'
-            icon = icons.get(cat, '📦')
-            share = (row['total'] / total_expenses * 100) if total_expenses > 0 else 0
-            
-            report += f"{icon} *{cat.title()}*\n"
-            report += f"   Total: ₹{row['total']:,.2f} ({share:.1f}%)\n"
-            report += f"   Count: {row['count']} | Avg: ₹{row['avg']:,.2f}\n\n"
-        
-        report += f"{'━' * 25}\n💰 Total Expenses: ₹{total_expenses:,.2f}"
-        
-        return report
-    
     def get_borrow_lend_summary(self, user_id: int) -> str:
-        """Complete borrow/lend tracking report."""
+        """Complete borrow/lend summary with detailed breakdown."""
+        with self.get_connection() as conn:
+            # Total borrowed (pending)
+            cursor = conn.execute('''
+                SELECT SUM(amount) as total FROM debt_tracking
+                WHERE user_id = ? AND debt_type = 'borrowed' AND status = 'pending'
+            ''', (user_id,))
+            total_borrowed = cursor.fetchone()['total'] or 0
+            
+            # Total lent (pending)
+            cursor = conn.execute('''
+                SELECT SUM(amount) as total FROM debt_tracking
+                WHERE user_id = ? AND debt_type = 'lent' AND status = 'pending'
+            ''', (user_id,))
+            total_lent = cursor.fetchone()['total'] or 0
+            
+            # Settled borrowed
+            cursor = conn.execute('''
+                SELECT SUM(amount) as total FROM debt_tracking
+                WHERE user_id = ? AND debt_type = 'borrowed' AND status = 'settled'
+            ''', (user_id,))
+            settled_borrowed = cursor.fetchone()['total'] or 0
+            
+            # Settled lent
+            cursor = conn.execute('''
+                SELECT SUM(amount) as total FROM debt_tracking
+                WHERE user_id = ? AND debt_type = 'lent' AND status = 'settled'
+            ''', (user_id,))
+            settled_lent = cursor.fetchone()['total'] or 0
+            
+            # Pending borrowed entries
+            cursor = conn.execute('''
+                SELECT contact_name, amount, borrow_date, purpose
+                FROM debt_tracking
+                WHERE user_id = ? AND debt_type = 'borrowed' AND status = 'pending'
+                ORDER BY borrow_date DESC
+                LIMIT 5
+            ''', (user_id,))
+            pending_borrows = cursor.fetchall()
+            
+            # Pending lent entries
+            cursor = conn.execute('''
+                SELECT contact_name, amount, borrow_date, purpose
+                FROM debt_tracking
+                WHERE user_id = ? AND debt_type = 'lent' AND status = 'pending'
+                ORDER BY borrow_date DESC
+                LIMIT 5
+            ''', (user_id,))
+            pending_lends = cursor.fetchall()
+        
+        report = f"""📒 *Borrow & Lend Summary*
+
+💰 *Outstanding Balances:*
+📥 You Owe: ₹{total_borrowed:,.2f}
+📤 Others Owe You: ₹{total_lent:,.2f}
+💵 Net Position: ₹{total_lent - total_borrowed:,.2f}
+
+✅ *Settled:*
+🔄 Borrowed & Returned: ₹{settled_borrowed:,.2f}
+🔁 Lent & Received: ₹{settled_lent:,.2f}
+"""
+        
+        if pending_borrows:
+            report += f"\n{'━' * 30}\n\n📥 *Money You Owe:*\n\n"
+            for rec in pending_borrows:
+                date_str = datetime.fromisoformat(rec['borrow_date']).strftime('%d %b %Y')
+                report += f"👤 {rec['contact_name']}: ₹{rec['amount']:,.2f}\n"
+                report += f"   📅 {date_str} | 📝 {rec['purpose'] or 'No note'}\n\n"
+        
+        if pending_lends:
+            report += f"{'━' * 30}\n\n📤 *Money Others Owe You:*\n\n"
+            for rec in pending_lends:
+                date_str = datetime.fromisoformat(rec['borrow_date']).strftime('%d %b %Y')
+                report += f"👤 {rec['contact_name']}: ₹{rec['amount']:,.2f}\n"
+                report += f"   📅 {date_str} | 📝 {rec['purpose'] or 'No note'}\n\n"
+        
+        return report.strip()
+    
+    def get_person_wise_report(self, user_id: int) -> str:
+        """Get person-wise borrow/lend report."""
         with self.get_connection() as conn:
             cursor = conn.execute('''
-                SELECT debt_type, contact_name, amount, purpose, created_at, is_settled
+                SELECT contact_name, debt_type, status, SUM(amount) as total, COUNT(*) as count
                 FROM debt_tracking
                 WHERE user_id = ?
-                ORDER BY created_at DESC
+                GROUP BY contact_name, debt_type, status
+                ORDER BY contact_name, debt_type
             ''', (user_id,))
             
             records = cursor.fetchall()
         
         if not records:
-            return "📒 *Borrow & Lend Summary*\n\n❌ No records found."
+            return "👤 *Person-wise Report*\n\n❌ No borrow/lend records found."
         
-        borrowed_total = lent_total = settled_total = 0
-        borrowed_list = []
-        lent_list = []
+        # Group by person
+        from collections import defaultdict
+        person_data = defaultdict(lambda: {'borrowed_pending': 0, 'borrowed_settled': 0,
+                                           'lent_pending': 0, 'lent_settled': 0})
         
         for rec in records:
-            if rec['debt_type'] == 'borrowed' and not rec['is_settled']:
-                borrowed_total += rec['amount']
-                borrowed_list.append(rec)
-            elif rec['debt_type'] == 'lent' and not rec['is_settled']:
-                lent_total += rec['amount']
-                lent_list.append(rec)
-            elif rec['debt_type'] == 'settlement':
-                settled_total += rec['amount']
+            person = rec['contact_name']
+            key = f"{rec['debt_type']}_{rec['status']}"
+            person_data[person][key] += rec['total']
         
-        report = "📒 *Borrow & Lend Summary*\n\n"
+        report = "👤 *Person-wise Report*\n\n"
         
-        report += f"💰 *Outstanding Balances*\n"
-        report += f"📥 You Owe: ₹{borrowed_total:,.2f}\n"
-        report += f"📤 Others Owe You: ₹{lent_total:,.2f}\n"
-        report += f"✅ Settled: ₹{settled_total:,.2f}\n\n"
-        
-        if borrowed_list:
-            report += f"{'━' * 30}\n\n📥 *Money You Borrowed*\n\n"
-            for rec in borrowed_list[:5]:
-                date_obj = datetime.strptime(rec['created_at'], '%Y-%m-%d %H:%M:%S')
-                report += f"👤 {rec['contact_name']}: ₹{rec['amount']:,.2f}\n"
-                report += f"   📝 {rec['purpose'] or 'No note'}\n"
-                report += f"   📅 {date_obj.strftime('%d %b %Y')}\n\n"
-        
-        if lent_list:
-            report += f"{'━' * 30}\n\n📤 *Money You Lent*\n\n"
-            for rec in lent_list[:5]:
-                date_obj = datetime.strptime(rec['created_at'], '%Y-%m-%d %H:%M:%S')
-                report += f"👤 {rec['contact_name']}: ₹{rec['amount']:,.2f}\n"
-                report += f"   📝 {rec['purpose'] or 'No note'}\n"
-                report += f"   📅 {date_obj.strftime('%d %b %Y')}\n\n"
+        for person, data in sorted(person_data.items()):
+            report += f"*{person}*\n"
+            if data['borrowed_pending'] > 0:
+                report += f"  📥 You owe: ₹{data['borrowed_pending']:,.2f}\n"
+            if data['lent_pending'] > 0:
+                report += f"  📤 They owe: ₹{data['lent_pending']:,.2f}\n"
+            if data['borrowed_settled'] > 0:
+                report += f"  ✅ Returned: ₹{data['borrowed_settled']:,.2f}\n"
+            if data['lent_settled'] > 0:
+                report += f"  ✅ Received: ₹{data['lent_settled']:,.2f}\n"
+            report += "\n"
         
         return report.strip()
     
+    # ========== User Settings ==========
+    
+    def get_users_for_daily_report(self) -> List[int]:
+        """Get all user IDs who have daily reports enabled."""
+        with self.get_connection() as conn:
+            cursor = conn.execute('''
+                SELECT DISTINCT user_id FROM user_settings WHERE daily_report = 1
+                UNION
+                SELECT DISTINCT user_id FROM transactions
+            ''')
+            return [row['user_id'] for row in cursor.fetchall()]
+    
+    def update_user_settings(self, user_id: int, daily_report: bool = True) -> None:
+        """Update user settings."""
+        with self.get_connection() as conn:
+            conn.execute('''
+                INSERT INTO user_settings (user_id, daily_report) 
+                VALUES (?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET daily_report = ?
+            ''', (user_id, daily_report, daily_report))
+    
     def wipe_user_data(self, user_id: int) -> None:
-        """Delete all data for a specific user."""
+        """Delete all data for a user."""
         with self.get_connection() as conn:
             conn.execute('DELETE FROM transactions WHERE user_id = ?', (user_id,))
             conn.execute('DELETE FROM debt_tracking WHERE user_id = ?', (user_id,))
+            conn.execute('DELETE FROM user_settings WHERE user_id = ?', (user_id,))
