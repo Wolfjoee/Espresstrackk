@@ -174,10 +174,94 @@ Track money borrowed from or lent to others.
     else:
         await update.message.reply_text(help_text, parse_mode='Markdown')
 
-# ========== Button Callback Handler ==========
+# ========== Entry Point Handlers (for ConversationHandler) ==========
+
+async def start_salary_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Entry point for salary conversation."""
+    query = update.callback_query
+    await query.answer()
+    await query.message.edit_text(
+        "💰 *Salary Credited*\n\n✅ Enter the salary amount:\n\n*Example:* `50000`",
+        parse_mode='Markdown', reply_markup=cancel_keyboard()
+    )
+    return AWAIT_SALARY
+
+async def start_expense_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Entry point for expense conversation."""
+    query = update.callback_query
+    await query.answer()
+    await query.message.edit_text(
+        "💸 *Add Expense*\n\n🧾 Enter in this format:\n"
+        "`<amount> <category> <description>`\n\n"
+        "*Examples:*\n"
+        "• `500 food Lunch at cafe`\n"
+        "• `1500 bills Electricity bill`\n"
+        "• `200 transport Auto fare`\n\n"
+        "*Categories:* food, transport, bills, shopping, health, entertainment, education, other",
+        parse_mode='Markdown', reply_markup=cancel_keyboard()
+    )
+    return AWAIT_EXPENSE
+
+async def start_savings_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Entry point for savings conversation."""
+    query = update.callback_query
+    await query.answer()
+    await query.message.edit_text(
+        "🏦 *Add to Savings*\n\n💾 Enter the amount to move to savings:\n\n*Example:* `5000`",
+        parse_mode='Markdown', reply_markup=cancel_keyboard()
+    )
+    return AWAIT_SAVINGS
+
+async def start_borrow_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Entry point for borrow conversation."""
+    query = update.callback_query
+    await query.answer()
+    await query.message.edit_text(
+        "📥 *Borrowed Money*\n\n"
+        "Enter details in this format:\n"
+        "`<amount> <from_whom> <purpose>`\n\n"
+        "*Example:* `5000 John For bike repair`",
+        parse_mode='Markdown', reply_markup=cancel_keyboard()
+    )
+    return AWAIT_BORROW
+
+async def start_lend_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Entry point for lend conversation."""
+    query = update.callback_query
+    await query.answer()
+    await query.message.edit_text(
+        "📤 *Money Given to Friend*\n\n"
+        "Enter details in this format:\n"
+        "`<amount> <friend_name> <purpose>`\n\n"
+        "*Example:* `2000 Sarah Emergency help`",
+        parse_mode='Markdown', reply_markup=cancel_keyboard()
+    )
+    return AWAIT_LEND
+
+async def start_return_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Entry point for return conversation."""
+    query = update.callback_query
+    await query.answer()
+    await query.message.edit_text(
+        "🔁 *Money Received Back*\n\n"
+        "Enter details in this format:\n"
+        "`<amount> <friend_name> <note>`\n\n"
+        "*Example:* `2000 Sarah Loan repayment`",
+        parse_mode='Markdown', reply_markup=cancel_keyboard()
+    )
+    return AWAIT_RETURN
+
+async def cancel_operation(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Cancel conversation and return to main menu."""
+    query = update.callback_query
+    await query.answer()
+    await start_command(update, context)
+    return ConversationHandler.END
+
+# ========== Button Callback Handler (Non-Conversation) ==========
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle all button clicks."""
+    """Handle non-conversation button clicks."""
     query = update.callback_query
     await query.answer()
     
@@ -187,38 +271,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Navigation
     if action == "main_menu":
         await start_command(update, context)
-        return ConversationHandler.END
     
     elif action == "show_help":
         await help_command(update, context)
-    
-    # Add transactions
-    elif action == "add_salary":
-        await query.message.edit_text(
-            "💰 *Salary Credited*\n\n✅ Enter the salary amount:\n\n*Example:* `50000`",
-            parse_mode='Markdown', reply_markup=cancel_keyboard()
-        )
-        return AWAIT_SALARY
-    
-    elif action == "add_expense":
-        await query.message.edit_text(
-            "💸 *Add Expense*\n\n🧾 Enter in this format:\n"
-            "`<amount> <category> <description>`\n\n"
-            "*Examples:*\n"
-            "• `500 food Lunch at cafe`\n"
-            "• `1500 bills Electricity bill`\n"
-            "• `200 transport Auto fare`\n\n"
-            "*Categories:* food, transport, bills, shopping, health, entertainment, education, other",
-            parse_mode='Markdown', reply_markup=cancel_keyboard()
-        )
-        return AWAIT_EXPENSE
-    
-    elif action == "add_savings":
-        await query.message.edit_text(
-            "🏦 *Add to Savings*\n\n💾 Enter the amount to move to savings:\n\n*Example:* `5000`",
-            parse_mode='Markdown', reply_markup=cancel_keyboard()
-        )
-        return AWAIT_SAVINGS
     
     # Reports
     elif action == "show_reports":
@@ -252,36 +307,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif action == "show_borrow":
         await query.message.edit_text("🤝 *Borrow & Lend Money*\n\nManage your loans:",
                                        reply_markup=borrow_keyboard())
-    
-    elif action == "borrowed":
-        await query.message.edit_text(
-            "📥 *Borrowed Money*\n\n"
-            "Enter details in this format:\n"
-            "`<amount> <from_whom> <purpose>`\n\n"
-            "*Example:* `5000 John For bike repair`",
-            parse_mode='Markdown', reply_markup=cancel_keyboard()
-        )
-        return AWAIT_BORROW
-    
-    elif action == "lent":
-        await query.message.edit_text(
-            "📤 *Money Given to Friend*\n\n"
-            "Enter details in this format:\n"
-            "`<amount> <friend_name> <purpose>`\n\n"
-            "*Example:* `2000 Sarah Emergency help`",
-            parse_mode='Markdown', reply_markup=cancel_keyboard()
-        )
-        return AWAIT_LEND
-    
-    elif action == "returned":
-        await query.message.edit_text(
-            "🔁 *Money Received Back*\n\n"
-            "Enter details in this format:\n"
-            "`<amount> <friend_name> <note>`\n\n"
-            "*Example:* `2000 Sarah Loan repayment`",
-            parse_mode='Markdown', reply_markup=cancel_keyboard()
-        )
-        return AWAIT_RETURN
     
     elif action == "borrow_report":
         report = db.get_borrow_lend_summary(user_id)
@@ -330,7 +355,8 @@ async def receive_salary(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
     except ValueError:
         await update.message.reply_text(
-            "❌ Invalid amount. Please enter a valid number.",
+            "❌ Invalid amount. Please enter a valid number.\n\n*Example:* `50000`",
+            parse_mode='Markdown',
             reply_markup=cancel_keyboard()
         )
         return AWAIT_SALARY
@@ -380,7 +406,8 @@ async def receive_expense(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
     except ValueError:
         await update.message.reply_text(
-            "❌ Invalid amount. Please try again.",
+            "❌ Invalid amount. Please try again.\n\n*Example:* `500 food lunch`",
+            parse_mode='Markdown',
             reply_markup=cancel_keyboard()
         )
         return AWAIT_EXPENSE
@@ -403,7 +430,8 @@ async def receive_savings(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
     except ValueError:
         await update.message.reply_text(
-            "❌ Invalid amount. Please enter a valid number.",
+            "❌ Invalid amount. Please enter a valid number.\n\n*Example:* `5000`",
+            parse_mode='Markdown',
             reply_markup=cancel_keyboard()
         )
         return AWAIT_SAVINGS
@@ -416,7 +444,7 @@ async def receive_borrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if len(parts) < 2:
             await update.message.reply_text(
-                "❌ Invalid format. Use:\n`<amount> <from_whom> <purpose>`",
+                "❌ Invalid format. Use:\n`<amount> <from_whom> <purpose>`\n\n*Example:* `5000 John bike repair`",
                 parse_mode='Markdown', reply_markup=cancel_keyboard()
             )
             return AWAIT_BORROW
@@ -439,7 +467,8 @@ async def receive_borrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
     except ValueError:
         await update.message.reply_text(
-            "❌ Invalid format. Please try again.",
+            "❌ Invalid format. Please try again.\n\n*Example:* `5000 John bike repair`",
+            parse_mode='Markdown',
             reply_markup=cancel_keyboard()
         )
         return AWAIT_BORROW
@@ -452,7 +481,7 @@ async def receive_lent(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if len(parts) < 2:
             await update.message.reply_text(
-                "❌ Invalid format. Use:\n`<amount> <friend_name> <purpose>`",
+                "❌ Invalid format. Use:\n`<amount> <friend_name> <purpose>`\n\n*Example:* `2000 Sarah emergency`",
                 parse_mode='Markdown', reply_markup=cancel_keyboard()
             )
             return AWAIT_LEND
@@ -475,7 +504,8 @@ async def receive_lent(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
     except ValueError:
         await update.message.reply_text(
-            "❌ Invalid format. Please try again.",
+            "❌ Invalid format. Please try again.\n\n*Example:* `2000 Sarah emergency`",
+            parse_mode='Markdown',
             reply_markup=cancel_keyboard()
         )
         return AWAIT_LEND
@@ -488,7 +518,7 @@ async def receive_returned(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if len(parts) < 2:
             await update.message.reply_text(
-                "❌ Invalid format. Use:\n`<amount> <friend_name> <note>`",
+                "❌ Invalid format. Use:\n`<amount> <friend_name> <note>`\n\n*Example:* `2000 Sarah repayment`",
                 parse_mode='Markdown', reply_markup=cancel_keyboard()
             )
             return AWAIT_RETURN
@@ -512,7 +542,8 @@ async def receive_returned(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
     except ValueError:
         await update.message.reply_text(
-            "❌ Invalid format. Please try again.",
+            "❌ Invalid format. Please try again.\n\n*Example:* `2000 Sarah repayment`",
+            parse_mode='Markdown',
             reply_markup=cancel_keyboard()
         )
         return AWAIT_RETURN
@@ -586,60 +617,68 @@ def main():
     
     app = Application.builder().token(token).build()
     
-    # Conversation handlers
+    # Conversation handlers with separate entry points
     salary_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(button_callback, pattern="^add_salary$")],
+        entry_points=[CallbackQueryHandler(start_salary_entry, pattern="^add_salary$")],
         states={AWAIT_SALARY: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_salary)]},
-        fallbacks=[CallbackQueryHandler(button_callback, pattern="^main_menu$")],
+        fallbacks=[CallbackQueryHandler(cancel_operation, pattern="^main_menu$")],
         allow_reentry=True
     )
     
     expense_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(button_callback, pattern="^add_expense$")],
+        entry_points=[CallbackQueryHandler(start_expense_entry, pattern="^add_expense$")],
         states={AWAIT_EXPENSE: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_expense)]},
-        fallbacks=[CallbackQueryHandler(button_callback, pattern="^main_menu$")],
+        fallbacks=[CallbackQueryHandler(cancel_operation, pattern="^main_menu$")],
         allow_reentry=True
     )
     
     savings_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(button_callback, pattern="^add_savings$")],
+        entry_points=[CallbackQueryHandler(start_savings_entry, pattern="^add_savings$")],
         states={AWAIT_SAVINGS: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_savings)]},
-        fallbacks=[CallbackQueryHandler(button_callback, pattern="^main_menu$")],
+        fallbacks=[CallbackQueryHandler(cancel_operation, pattern="^main_menu$")],
         allow_reentry=True
     )
     
     borrow_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(button_callback, pattern="^borrowed$")],
+        entry_points=[CallbackQueryHandler(start_borrow_entry, pattern="^borrowed$")],
         states={AWAIT_BORROW: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_borrow)]},
-        fallbacks=[CallbackQueryHandler(button_callback, pattern="^main_menu$")],
+        fallbacks=[CallbackQueryHandler(cancel_operation, pattern="^main_menu$")],
         allow_reentry=True
     )
     
     lend_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(button_callback, pattern="^lent$")],
+        entry_points=[CallbackQueryHandler(start_lend_entry, pattern="^lent$")],
         states={AWAIT_LEND: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_lent)]},
-        fallbacks=[CallbackQueryHandler(button_callback, pattern="^main_menu$")],
+        fallbacks=[CallbackQueryHandler(cancel_operation, pattern="^main_menu$")],
         allow_reentry=True
     )
     
     return_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(button_callback, pattern="^returned$")],
+        entry_points=[CallbackQueryHandler(start_return_entry, pattern="^returned$")],
         states={AWAIT_RETURN: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_returned)]},
-        fallbacks=[CallbackQueryHandler(button_callback, pattern="^main_menu$")],
+        fallbacks=[CallbackQueryHandler(cancel_operation, pattern="^main_menu$")],
         allow_reentry=True
     )
     
-    # Add all handlers
+    # Add handlers in correct order
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("help", help_command))
+    
+    # Add conversation handlers BEFORE the general callback handler
     app.add_handler(salary_conv)
     app.add_handler(expense_conv)
     app.add_handler(savings_conv)
     app.add_handler(borrow_conv)
     app.add_handler(lend_conv)
     app.add_handler(return_conv)
+    
+    # General callback handler (for non-conversation buttons)
     app.add_handler(CallbackQueryHandler(button_callback))
+    
+    # Text handler for quick commands
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    
+    # Error handler
     app.add_error_handler(error_handler)
     
     logger.info("🚀 Finance Tracker Bot Started Successfully!")
