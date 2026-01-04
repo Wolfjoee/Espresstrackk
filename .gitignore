@@ -42,3 +42,7 @@ wheels/
 # OS
 .DS_Store
 Thumbs.db
+# In your project folder
+git add .
+git commit -m "Add inline buttons and new features"
+git push
