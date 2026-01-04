@@ -1,13 +1,15 @@
 import os
 import logging
+from datetime import datetime, time as dt_time
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
     CallbackQueryHandler, ConversationHandler,
     filters, ContextTypes
 )
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 from database import Database
-from datetime import datetime
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -16,67 +18,105 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 db = Database()
+scheduler = AsyncIOScheduler()
 
 # Conversation states
-(AWAIT_SALARY, AWAIT_EXPENSE, AWAIT_SAVINGS,
- AWAIT_BORROW, AWAIT_LEND, AWAIT_RETURN) = range(6)
+(AWAIT_INCOME, AWAIT_EXPENSE, AWAIT_BORROW_AMOUNT, AWAIT_BORROW_PERSON,
+ AWAIT_BORROW_PURPOSE, AWAIT_LEND_AMOUNT, AWAIT_LEND_PERSON, AWAIT_LEND_PURPOSE) = range(8)
 
 # ========== Keyboard Layouts ==========
 
 def main_keyboard():
-    """Primary navigation menu."""
+    """Enhanced main menu."""
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("➡️ Salary Credited", callback_data="add_salary"),
-            InlineKeyboardButton("➡️ Add Expense", callback_data="add_expense")
+            InlineKeyboardButton("💰 Add Income", callback_data="add_income"),
+            InlineKeyboardButton("💸 Add Expense", callback_data="add_expense")
         ],
         [
-            InlineKeyboardButton("➡️ Add to Savings", callback_data="add_savings"),
-            InlineKeyboardButton("📊 Reports", callback_data="show_reports")
+            InlineKeyboardButton("🤝 Borrow & Lend", callback_data="menu_borrow_lend"),
+            InlineKeyboardButton("📊 Statements", callback_data="menu_statements")
         ],
         [
-            InlineKeyboardButton("🤝 Borrow & Lend", callback_data="show_borrow"),
-            InlineKeyboardButton("📝 Mini Statement", callback_data="mini_statement")
-        ],
-        [
-            InlineKeyboardButton("🔄 Reset All Data", callback_data="confirm_reset"),
+            InlineKeyboardButton("⚙️ Settings", callback_data="menu_settings"),
             InlineKeyboardButton("❓ Help", callback_data="show_help")
         ]
     ])
 
-def reports_keyboard():
-    """Reports submenu."""
+def borrow_lend_keyboard():
+    """Borrow & Lend main menu."""
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("📅 Today Report", callback_data="report_today"),
-            InlineKeyboardButton("📆 Month Report", callback_data="report_month")
+            InlineKeyboardButton("📥 Borrowed Money", callback_data="borrowed_money"),
+            InlineKeyboardButton("📤 Lent Money", callback_data="lent_money")
         ],
         [
-            InlineKeyboardButton("💸 Daily Expenses", callback_data="daily_expenses"),
-            InlineKeyboardButton("📈 Spending Analysis", callback_data="spending_analysis")
+            InlineKeyboardButton("🔄 Money Received", callback_data="money_received"),
+            InlineKeyboardButton("🔁 Money Returned", callback_data="money_returned")
         ],
         [
-            InlineKeyboardButton("📅 Complete Month Report", callback_data="complete_report")
+            InlineKeyboardButton("📜 Borrow & Lend Summary", callback_data="bl_summary")
         ],
-        [InlineKeyboardButton("🔙 Main Menu", callback_data="main_menu")]
+        [
+            InlineKeyboardButton("🔙 Main Menu", callback_data="main_menu")
+        ]
     ])
 
-def borrow_keyboard():
-    """Borrow & Lend submenu."""
+def statements_keyboard():
+    """Statements menu."""
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("📥 Borrowed Money", callback_data="borrowed"),
-            InlineKeyboardButton("📤 Money Given", callback_data="lent")
+            InlineKeyboardButton("📅 Monthly Statement", callback_data="monthly_statement"),
+            InlineKeyboardButton("📆 Custom Date Range", callback_data="custom_date")
         ],
         [
-            InlineKeyboardButton("🔁 Money Received", callback_data="returned"),
-            InlineKeyboardButton("📒 Borrow/Lend Report", callback_data="borrow_report")
+            InlineKeyboardButton("🤝 Borrow & Lend Statement", callback_data="bl_statement"),
+            InlineKeyboardButton("💸 Expense Category Report", callback_data="expense_category")
         ],
-        [InlineKeyboardButton("🔙 Main Menu", callback_data="main_menu")]
+        [
+            InlineKeyboardButton("💰 Income Summary", callback_data="income_summary"),
+            InlineKeyboardButton("📈 Net Balance Report", callback_data="net_balance")
+        ],
+        [
+            InlineKeyboardButton("🔙 Main Menu", callback_data="main_menu")
+        ]
+    ])
+
+def borrow_lend_statement_keyboard():
+    """Advanced Borrow & Lend statement options."""
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📥 Total Borrowed", callback_data="total_borrowed"),
+            InlineKeyboardButton("📤 Total Lent", callback_data="total_lent")
+        ],
+        [
+            InlineKeyboardButton("⏳ Pending Amount", callback_data="pending_amount"),
+            InlineKeyboardButton("✅ Settled Amount", callback_data="settled_amount")
+        ],
+        [
+            InlineKeyboardButton("👤 Person-wise Report", callback_data="person_wise")
+        ],
+        [
+            InlineKeyboardButton("🔙 Statements", callback_data="menu_statements")
+        ]
+    ])
+
+def settings_keyboard():
+    """Settings menu."""
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📬 Daily Reports: ON", callback_data="toggle_daily_report"),
+        ],
+        [
+            InlineKeyboardButton("🔄 Reset All Data", callback_data="confirm_reset")
+        ],
+        [
+            InlineKeyboardButton("🔙 Main Menu", callback_data="main_menu")
+        ]
     ])
 
 def cancel_keyboard():
-    """Cancel operation button."""
+    """Cancel button."""
     return InlineKeyboardMarkup([[
         InlineKeyboardButton("❌ Cancel", callback_data="main_menu")
     ]])
@@ -91,21 +131,21 @@ def confirm_reset_keyboard():
     ])
 
 def back_to_menu():
-    """Single back button."""
+    """Back to main menu."""
     return InlineKeyboardMarkup([[
         InlineKeyboardButton("🔙 Main Menu", callback_data="main_menu")
     ]])
 
-def back_to_borrow():
-    """Back to borrow menu."""
+def back_to_statements():
+    """Back to statements menu."""
     return InlineKeyboardMarkup([[
-        InlineKeyboardButton("🔙 Borrow & Lend", callback_data="show_borrow")
+        InlineKeyboardButton("🔙 Statements", callback_data="menu_statements")
     ]])
 
-def back_to_reports():
-    """Back to reports menu."""
+def back_to_borrow_lend():
+    """Back to borrow/lend menu."""
     return InlineKeyboardMarkup([[
-        InlineKeyboardButton("🔙 Reports", callback_data="show_reports")
+        InlineKeyboardButton("🔙 Borrow & Lend", callback_data="menu_borrow_lend")
     ]])
 
 # ========== Command Handlers ==========
@@ -114,13 +154,13 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command."""
     message = """👋 *Welcome to Advanced Finance Tracker!*
 
-Track all your finances in one place:
+Your complete financial management solution:
 
-💰 *Income & Salary*
-💸 *Expenses by Category*
-🏦 *Savings Tracking*
-🤝 *Borrow & Lend Money*
-📊 *Detailed Reports*
+💰 *Income Tracking*
+💸 *Expense Management*
+🤝 *Borrow & Lend Records*
+📊 *Detailed Statements*
+📬 *Automated Daily Reports*
 
 Choose an option below to get started!"""
     
@@ -135,37 +175,40 @@ Choose an option below to get started!"""
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show help information."""
-    help_text = """📖 *How to Use This Bot*
+    help_text = """📖 *Complete User Guide*
 
-*💰 Salary / Income:*
-Click "Salary Credited" and enter amount.
+*💰 Add Income:*
+Record salary, freelance, or any income source.
 
-*💸 Expenses:*
-Click "Add Expense" then enter:
-`<amount> <category> <description>`
-
-*Categories:* food, transport, bills, shopping, health, entertainment, education, other
-
-*Example:* `500 food Lunch at restaurant`
-
-*🏦 Savings:*
-Click "Add to Savings" and enter amount.
+*💸 Add Expense:*
+Track expenses with categories:
+• Food, Transport, Bills, Shopping
+• Health, Entertainment, Education, Other
 
 *🤝 Borrow & Lend:*
-Track money borrowed from or lent to others.
+• Record money borrowed from others
+• Track money lent to friends
+• Mark received/returned amounts
+• Get detailed summaries
 
-*📊 Reports:*
-• Today Report - Today's activity
-• Month Report - Monthly summary
-• Daily Expenses - Day-by-day view
-• Spending Analysis - Category breakdown
-• Complete Month Report - Full details
-• Mini Statement - Last 30 days
+*📊 Statements:*
+• Monthly financial statements
+• Custom date range reports
+• Category-wise expense analysis
+• Person-wise borrow/lend report
+• Net balance overview
+
+*⚙️ Settings:*
+• Enable/disable daily reports
+• Daily reports sent at 6:00 AM
+• Reset all data option
 
 *Quick Commands:*
-• `salary 50000`
+• `income 50000 salary`
 • `spend 500 food lunch`
-• `save 5000`"""
+
+*📬 Daily Automation:*
+Yesterday's report automatically sent every morning at 6 AM!"""
     
     if update.callback_query:
         await update.callback_query.message.edit_text(
@@ -174,27 +217,35 @@ Track money borrowed from or lent to others.
     else:
         await update.message.reply_text(help_text, parse_mode='Markdown')
 
-# ========== Entry Point Handlers (for ConversationHandler) ==========
+# ========== Entry Point Handlers ==========
 
-async def start_salary_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Entry point for salary conversation."""
+async def start_income_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Start income entry conversation."""
     query = update.callback_query
     await query.answer()
     await query.message.edit_text(
-        "💰 *Salary Credited*\n\n✅ Enter the salary amount:\n\n*Example:* `50000`",
-        parse_mode='Markdown', reply_markup=cancel_keyboard()
-    )
-    return AWAIT_SALARY
-
-async def start_expense_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Entry point for expense conversation."""
-    query = update.callback_query
-    await query.answer()
-    await query.message.edit_text(
-        "💸 *Add Expense*\n\n🧾 Enter in this format:\n"
+        "💰 *Add Income*\n\n"
+        "Enter income details in this format:\n"
         "`<amount> <category> <description>`\n\n"
         "*Examples:*\n"
-        "• `500 food Lunch at cafe`\n"
+        "• `50000 salary Monthly salary`\n"
+        "• `15000 freelance Project payment`\n"
+        "• `5000 bonus Performance bonus`\n\n"
+        "*Categories:* salary, freelance, business, investment, bonus, other",
+        parse_mode='Markdown', reply_markup=cancel_keyboard()
+    )
+    return AWAIT_INCOME
+
+async def start_expense_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Start expense entry conversation."""
+    query = update.callback_query
+    await query.answer()
+    await query.message.edit_text(
+        "💸 *Add Expense*\n\n"
+        "Enter expense details in this format:\n"
+        "`<amount> <category> <description>`\n\n"
+        "*Examples:*\n"
+        "• `500 food Lunch at restaurant`\n"
         "• `1500 bills Electricity bill`\n"
         "• `200 transport Auto fare`\n\n"
         "*Categories:* food, transport, bills, shopping, health, entertainment, education, other",
@@ -202,66 +253,113 @@ async def start_expense_entry(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
     return AWAIT_EXPENSE
 
-async def start_savings_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Entry point for savings conversation."""
-    query = update.callback_query
-    await query.answer()
-    await query.message.edit_text(
-        "🏦 *Add to Savings*\n\n💾 Enter the amount to move to savings:\n\n*Example:* `5000`",
-        parse_mode='Markdown', reply_markup=cancel_keyboard()
-    )
-    return AWAIT_SAVINGS
-
-async def start_borrow_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Entry point for borrow conversation."""
+async def start_borrowed_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Start borrowed money entry."""
     query = update.callback_query
     await query.answer()
     await query.message.edit_text(
         "📥 *Borrowed Money*\n\n"
+        "➕ *Add New Borrow*\n\n"
         "Enter details in this format:\n"
         "`<amount> <from_whom> <purpose>`\n\n"
-        "*Example:* `5000 John For bike repair`",
+        "*Example:*\n"
+        "`5000 John Emergency medical expense`",
         parse_mode='Markdown', reply_markup=cancel_keyboard()
     )
-    return AWAIT_BORROW
+    return AWAIT_BORROW_AMOUNT
 
-async def start_lend_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Entry point for lend conversation."""
+async def start_lent_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Start lent money entry."""
     query = update.callback_query
     await query.answer()
     await query.message.edit_text(
-        "📤 *Money Given to Friend*\n\n"
+        "📤 *Lent Money*\n\n"
+        "➕ *Add New Lend*\n\n"
         "Enter details in this format:\n"
-        "`<amount> <friend_name> <purpose>`\n\n"
-        "*Example:* `2000 Sarah Emergency help`",
+        "`<amount> <to_whom> <purpose>`\n\n"
+        "*Example:*\n"
+        "`2000 Sarah Business startup help`",
         parse_mode='Markdown', reply_markup=cancel_keyboard()
     )
-    return AWAIT_LEND
+    return AWAIT_LEND_AMOUNT
 
-async def start_return_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Entry point for return conversation."""
+async def handle_money_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle money received back."""
     query = update.callback_query
     await query.answer()
+    
+    user_id = query.from_user.id
+    pending_lends = db.get_pending_lends(user_id)
+    
+    if not pending_lends:
+        await query.message.edit_text(
+            "🔄 *Money Received*\n\n"
+            "❌ No pending lent money records found.\n\n"
+            "You need to lend money first before marking it as received.",
+            parse_mode='Markdown',
+            reply_markup=back_to_borrow_lend()
+        )
+        return
+    
+    # Create buttons for each pending lend
+    keyboard = []
+    for lend in pending_lends[:10]:  # Show max 10
+        button_text = f"👤 {lend['contact_name']}: ₹{lend['amount']:,.2f}"
+        keyboard.append([InlineKeyboardButton(button_text, callback_data=f"receive_{lend['id']}")])
+    
+    keyboard.append([InlineKeyboardButton("🔙 Borrow & Lend", callback_data="menu_borrow_lend")])
+    
     await query.message.edit_text(
-        "🔁 *Money Received Back*\n\n"
-        "Enter details in this format:\n"
-        "`<amount> <friend_name> <note>`\n\n"
-        "*Example:* `2000 Sarah Loan repayment`",
-        parse_mode='Markdown', reply_markup=cancel_keyboard()
+        "🔄 *Money Received Back*\n\n"
+        "✅ Select the person who returned the money:",
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
-    return AWAIT_RETURN
+
+async def handle_money_returned(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle money returned."""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    pending_borrows = db.get_pending_borrows(user_id)
+    
+    if not pending_borrows:
+        await query.message.edit_text(
+            "🔁 *Money Returned*\n\n"
+            "❌ No pending borrowed money records found.\n\n"
+            "You need to borrow money first before marking it as returned.",
+            parse_mode='Markdown',
+            reply_markup=back_to_borrow_lend()
+        )
+        return
+    
+    # Create buttons for each pending borrow
+    keyboard = []
+    for borrow in pending_borrows[:10]:  # Show max 10
+        button_text = f"👤 {borrow['contact_name']}: ₹{borrow['amount']:,.2f}"
+        keyboard.append([InlineKeyboardButton(button_text, callback_data=f"return_{borrow['id']}")])
+    
+    keyboard.append([InlineKeyboardButton("🔙 Borrow & Lend", callback_data="menu_borrow_lend")])
+    
+    await query.message.edit_text(
+        "🔁 *Money Returned*\n\n"
+        "✅ Select the person you returned money to:",
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
 async def cancel_operation(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Cancel conversation and return to main menu."""
+    """Cancel operation."""
     query = update.callback_query
     await query.answer()
     await start_command(update, context)
     return ConversationHandler.END
 
-# ========== Button Callback Handler (Non-Conversation) ==========
+# ========== Button Callback Handler ==========
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle non-conversation button clicks."""
+    """Handle all button clicks."""
     query = update.callback_query
     await query.answer()
     
@@ -275,91 +373,176 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif action == "show_help":
         await help_command(update, context)
     
-    # Reports
-    elif action == "show_reports":
-        await query.message.edit_text("📊 *Select Report Type*", reply_markup=reports_keyboard())
+    # Menus
+    elif action == "menu_borrow_lend":
+        await query.message.edit_text(
+            "🤝 *Borrow & Lend Money*\n\n"
+            "Complete loan management system:",
+            reply_markup=borrow_lend_keyboard()
+        )
     
-    elif action == "report_today":
-        report = db.get_today_summary(user_id)
-        await query.message.edit_text(report, parse_mode='Markdown', reply_markup=back_to_reports())
+    elif action == "menu_statements":
+        await query.message.edit_text(
+            "📊 *Financial Statements*\n\n"
+            "Select statement type:",
+            reply_markup=statements_keyboard()
+        )
     
-    elif action == "report_month":
-        report = db.get_monthly_overview(user_id)
-        await query.message.edit_text(report, parse_mode='Markdown', reply_markup=back_to_reports())
+    elif action == "menu_settings":
+        await query.message.edit_text(
+            "⚙️ *Settings*\n\n"
+            "Configure your preferences:",
+            reply_markup=settings_keyboard()
+        )
     
-    elif action == "complete_report":
-        report = db.get_complete_monthly_report(user_id)
-        await query.message.edit_text(report, parse_mode='Markdown', reply_markup=back_to_reports())
+    # Statements
+    elif action == "monthly_statement":
+        report = db.get_monthly_statement(user_id)
+        await query.message.edit_text(report, parse_mode='Markdown', reply_markup=back_to_statements())
     
-    elif action == "daily_expenses":
-        report = db.get_daily_expense_breakdown(user_id)
-        await query.message.edit_text(report, parse_mode='Markdown', reply_markup=back_to_reports())
+    elif action == "bl_statement":
+        await query.message.edit_text(
+            "🤝 *Borrow & Lend Statement*\n\n"
+            "Select report type:",
+            reply_markup=borrow_lend_statement_keyboard()
+        )
     
-    elif action == "spending_analysis":
-        report = db.get_category_analysis(user_id)
-        await query.message.edit_text(report, parse_mode='Markdown', reply_markup=back_to_reports())
-    
-    elif action == "mini_statement":
-        statement = db.get_last_30_days_statement(user_id)
-        await query.message.edit_text(statement, parse_mode='Markdown', reply_markup=back_to_menu())
-    
-    # Borrow & Lend
-    elif action == "show_borrow":
-        await query.message.edit_text("🤝 *Borrow & Lend Money*\n\nManage your loans:",
-                                       reply_markup=borrow_keyboard())
-    
-    elif action == "borrow_report":
+    elif action == "bl_summary":
         report = db.get_borrow_lend_summary(user_id)
-        await query.message.edit_text(report, parse_mode='Markdown', reply_markup=back_to_borrow())
+        await query.message.edit_text(report, parse_mode='Markdown', reply_markup=back_to_borrow_lend())
+    
+    elif action == "person_wise":
+        report = db.get_person_wise_report(user_id)
+        await query.message.edit_text(report, parse_mode='Markdown', 
+                                       reply_markup=InlineKeyboardMarkup([[
+                                           InlineKeyboardButton("🔙 Back", callback_data="bl_statement")
+                                       ]]))
+    
+    elif action == "total_borrowed":
+        pending_borrows = db.get_pending_borrows(user_id)
+        total = sum(b['amount'] for b in pending_borrows)
+        report = f"📥 *Total Borrowed (Pending)*\n\n💰 Amount: ₹{total:,.2f}\n📊 Count: {len(pending_borrows)} entries"
+        await query.message.edit_text(report, parse_mode='Markdown',
+                                       reply_markup=InlineKeyboardMarkup([[
+                                           InlineKeyboardButton("🔙 Back", callback_data="bl_statement")
+                                       ]]))
+    
+    elif action == "total_lent":
+        pending_lends = db.get_pending_lends(user_id)
+        total = sum(l['amount'] for l in pending_lends)
+        report = f"📤 *Total Lent (Pending)*\n\n💰 Amount: ₹{total:,.2f}\n📊 Count: {len(pending_lends)} entries"
+        await query.message.edit_text(report, parse_mode='Markdown',
+                                       reply_markup=InlineKeyboardMarkup([[
+                                           InlineKeyboardButton("🔙 Back", callback_data="bl_statement")
+                                       ]]))
+    
+    # Settings
+    elif action == "toggle_daily_report":
+        db.update_user_settings(user_id, True)
+        await query.message.edit_text(
+            "✅ *Daily Reports Enabled*\n\n"
+            "📬 You will receive yesterday's report every morning at 6:00 AM.\n\n"
+            "The report includes:\n"
+            "• Income summary\n"
+            "• Expense breakdown\n"
+            "• Net balance",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔙 Settings", callback_data="menu_settings")
+            ]])
+        )
     
     # Reset
     elif action == "confirm_reset":
         await query.message.edit_text(
             "⚠️ *WARNING: Reset All Data*\n\n"
             "This will permanently delete:\n"
-            "• All salary records\n"
-            "• All expenses\n"
-            "• All savings\n"
-            "• All borrow/lend records\n\n"
+            "• All income records\n"
+            "• All expense records\n"
+            "• All borrow/lend records\n"
+            "• All statements\n\n"
             "❗ *This action CANNOT be undone!*\n\n"
             "Are you absolutely sure?",
-            parse_mode='Markdown', reply_markup=confirm_reset_keyboard()
+            parse_mode='Markdown',
+            reply_markup=confirm_reset_keyboard()
         )
     
     elif action == "execute_reset":
         db.wipe_user_data(user_id)
         await query.message.edit_text(
             "✅ *All Data Deleted Successfully!*\n\n"
-            "Your account has been reset to zero.\n"
-            "You can start adding new transactions now.",
-            parse_mode='Markdown', reply_markup=main_keyboard()
+            "Your account has been reset.\n"
+            "You can start adding new records now.",
+            parse_mode='Markdown',
+            reply_markup=main_keyboard()
+        )
+    
+    # Handle receive/return callbacks
+    elif action.startswith("receive_"):
+        debt_id = int(action.split("_")[1])
+        db.mark_money_received(user_id, debt_id)
+        await query.message.edit_text(
+            "✅ *Money Received Marked!*\n\n"
+            "The lent amount has been marked as received.\n"
+            "Your balance has been updated.",
+            parse_mode='Markdown',
+            reply_markup=back_to_borrow_lend()
+        )
+    
+    elif action.startswith("return_"):
+        debt_id = int(action.split("_")[1])
+        db.mark_money_returned(user_id, debt_id)
+        await query.message.edit_text(
+            "✅ *Money Returned Marked!*\n\n"
+            "The borrowed amount has been marked as returned.\n"
+            "Your balance has been updated.",
+            parse_mode='Markdown',
+            reply_markup=back_to_borrow_lend()
         )
 
 # ========== Conversation Input Handlers ==========
 
-async def receive_salary(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Process salary input."""
+async def receive_income(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Process income input."""
     try:
-        amount = float(update.message.text.strip())
-        user_id = update.effective_user.id
+        text = update.message.text.strip()
+        parts = text.split(None, 2)
         
-        db.record_salary(user_id, amount)
+        if len(parts) < 2:
+            await update.message.reply_text(
+                "❌ Invalid format. Use:\n`<amount> <category> <description>`",
+                parse_mode='Markdown', reply_markup=cancel_keyboard()
+            )
+            return AWAIT_INCOME
+        
+        amount = float(parts[0])
+        category = parts[1].lower()
+        description = parts[2] if len(parts) > 2 else ""
+        
+        user_id = update.effective_user.id
+        db.record_income(user_id, amount, category, description)
+        
+        category_icons = {
+            'salary': '💰', 'freelance': '💼', 'business': '🏢',
+            'investment': '📈', 'bonus': '🎁', 'other': '💵'
+        }
+        icon = category_icons.get(category, '💰')
         
         await update.message.reply_text(
-            f"✅ *Salary Credited Successfully!*\n\n"
+            f"✅ *Income Recorded!*\n\n"
+            f"{icon} Category: {category.title()}\n"
             f"💰 Amount: ₹{amount:,.2f}\n"
-            f"📅 Date: {datetime.now().strftime('%d %b %Y, %I:%M %p')}\n\n"
-            f"Your balance has been updated.",
+            f"📝 Note: {description if description else 'No note'}\n"
+            f"📅 Date: {datetime.now().strftime('%d %b %Y, %I:%M %p')}",
             parse_mode='Markdown', reply_markup=main_keyboard()
         )
         return ConversationHandler.END
     except ValueError:
         await update.message.reply_text(
-            "❌ Invalid amount. Please enter a valid number.\n\n*Example:* `50000`",
-            parse_mode='Markdown',
+            "❌ Invalid amount. Please try again.",
             reply_markup=cancel_keyboard()
         )
-        return AWAIT_SALARY
+        return AWAIT_INCOME
 
 async def receive_expense(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Process expense input."""
@@ -369,8 +552,7 @@ async def receive_expense(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if len(parts) < 2:
             await update.message.reply_text(
-                "❌ Invalid format. Use:\n`<amount> <category> <description>`\n\n"
-                "Example: `500 food Lunch`",
+                "❌ Invalid format. Use:\n`<amount> <category> <description>`",
                 parse_mode='Markdown', reply_markup=cancel_keyboard()
             )
             return AWAIT_EXPENSE
@@ -379,15 +561,14 @@ async def receive_expense(update: Update, context: ContextTypes.DEFAULT_TYPE):
         category = parts[1].lower()
         description = parts[2] if len(parts) > 2 else ""
         
-        # Validate category
-        valid_categories = ['food', 'transport', 'bills', 'shopping', 'health', 'entertainment', 'education', 'other']
+        valid_categories = ['food', 'transport', 'bills', 'shopping', 'health', 
+                          'entertainment', 'education', 'other']
         if category not in valid_categories:
             category = 'other'
         
         user_id = update.effective_user.id
         db.record_expense(user_id, amount, category, description)
         
-        # Category emojis
         category_icons = {
             'food': '🍔', 'transport': '🚗', 'bills': '🏠',
             'shopping': '🛍️', 'health': '💊', 'entertainment': '🎬',
@@ -406,35 +587,10 @@ async def receive_expense(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
     except ValueError:
         await update.message.reply_text(
-            "❌ Invalid amount. Please try again.\n\n*Example:* `500 food lunch`",
-            parse_mode='Markdown',
+            "❌ Invalid amount. Please try again.",
             reply_markup=cancel_keyboard()
         )
         return AWAIT_EXPENSE
-
-async def receive_savings(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Process savings input."""
-    try:
-        amount = float(update.message.text.strip())
-        user_id = update.effective_user.id
-        
-        db.record_savings(user_id, amount)
-        
-        await update.message.reply_text(
-            f"✅ *Amount Added to Savings!*\n\n"
-            f"🏦 Savings: ₹{amount:,.2f}\n"
-            f"📅 Date: {datetime.now().strftime('%d %b %Y, %I:%M %p')}\n\n"
-            f"💾 Amount moved to your savings account.",
-            parse_mode='Markdown', reply_markup=main_keyboard()
-        )
-        return ConversationHandler.END
-    except ValueError:
-        await update.message.reply_text(
-            "❌ Invalid amount. Please enter a valid number.\n\n*Example:* `5000`",
-            parse_mode='Markdown',
-            reply_markup=cancel_keyboard()
-        )
-        return AWAIT_SAVINGS
 
 async def receive_borrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Process borrowed money input."""
@@ -444,109 +600,71 @@ async def receive_borrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if len(parts) < 2:
             await update.message.reply_text(
-                "❌ Invalid format. Use:\n`<amount> <from_whom> <purpose>`\n\n*Example:* `5000 John bike repair`",
+                "❌ Invalid format. Use:\n`<amount> <from_whom> <purpose>`",
                 parse_mode='Markdown', reply_markup=cancel_keyboard()
             )
-            return AWAIT_BORROW
+            return AWAIT_BORROW_AMOUNT
         
         amount = float(parts[0])
         person = parts[1]
         purpose = parts[2] if len(parts) > 2 else ""
         
         user_id = update.effective_user.id
-        db.record_borrowed(user_id, amount, person, purpose)
+        db.add_borrowed_money(user_id, amount, person, purpose)
         
         await update.message.reply_text(
             f"📥 *Borrowed Money Recorded!*\n\n"
             f"💰 Amount: ₹{amount:,.2f}\n"
             f"👤 From: {person}\n"
             f"📝 Purpose: {purpose if purpose else 'No note'}\n"
-            f"📅 Date: {datetime.now().strftime('%d %b %Y')}",
+            f"📅 Date: {datetime.now().strftime('%d %b %Y')}\n\n"
+            f"⏳ Status: Pending",
             parse_mode='Markdown', reply_markup=main_keyboard()
         )
         return ConversationHandler.END
     except ValueError:
         await update.message.reply_text(
-            "❌ Invalid format. Please try again.\n\n*Example:* `5000 John bike repair`",
-            parse_mode='Markdown',
+            "❌ Invalid format. Please try again.",
             reply_markup=cancel_keyboard()
         )
-        return AWAIT_BORROW
+        return AWAIT_BORROW_AMOUNT
 
-async def receive_lent(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Process money lent input."""
+async def receive_lend(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Process lent money input."""
     try:
         text = update.message.text.strip()
         parts = text.split(None, 2)
         
         if len(parts) < 2:
             await update.message.reply_text(
-                "❌ Invalid format. Use:\n`<amount> <friend_name> <purpose>`\n\n*Example:* `2000 Sarah emergency`",
+                "❌ Invalid format. Use:\n`<amount> <to_whom> <purpose>`",
                 parse_mode='Markdown', reply_markup=cancel_keyboard()
             )
-            return AWAIT_LEND
+            return AWAIT_LEND_AMOUNT
         
         amount = float(parts[0])
         person = parts[1]
         purpose = parts[2] if len(parts) > 2 else ""
         
         user_id = update.effective_user.id
-        db.record_lent(user_id, amount, person, purpose)
+        db.add_lent_money(user_id, amount, person, purpose)
         
         await update.message.reply_text(
-            f"📤 *Money Given Recorded!*\n\n"
+            f"📤 *Lent Money Recorded!*\n\n"
             f"💰 Amount: ₹{amount:,.2f}\n"
             f"👤 To: {person}\n"
             f"📝 Purpose: {purpose if purpose else 'No note'}\n"
-            f"📅 Date: {datetime.now().strftime('%d %b %Y')}",
-            parse_mode='Markdown', reply_markup=main_keyboard()
-        )
-        return ConversationHandler.END
-    except ValueError:
-        await update.message.reply_text(
-            "❌ Invalid format. Please try again.\n\n*Example:* `2000 Sarah emergency`",
-            parse_mode='Markdown',
-            reply_markup=cancel_keyboard()
-        )
-        return AWAIT_LEND
-
-async def receive_returned(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Process money received back input."""
-    try:
-        text = update.message.text.strip()
-        parts = text.split(None, 2)
-        
-        if len(parts) < 2:
-            await update.message.reply_text(
-                "❌ Invalid format. Use:\n`<amount> <friend_name> <note>`\n\n*Example:* `2000 Sarah repayment`",
-                parse_mode='Markdown', reply_markup=cancel_keyboard()
-            )
-            return AWAIT_RETURN
-        
-        amount = float(parts[0])
-        person = parts[1]
-        note = parts[2] if len(parts) > 2 else ""
-        
-        user_id = update.effective_user.id
-        db.record_debt_settlement(user_id, amount, person, note)
-        
-        await update.message.reply_text(
-            f"🔁 *Money Received Back!*\n\n"
-            f"💰 Amount: ₹{amount:,.2f}\n"
-            f"👤 From: {person}\n"
-            f"📝 Note: {note if note else 'No note'}\n"
             f"📅 Date: {datetime.now().strftime('%d %b %Y')}\n\n"
-            f"✅ Balance updated successfully.",
+            f"⏳ Status: Pending",
             parse_mode='Markdown', reply_markup=main_keyboard()
         )
         return ConversationHandler.END
     except ValueError:
         await update.message.reply_text(
-            "❌ Invalid format. Please try again.\n\n*Example:* `2000 Sarah repayment`",
-            parse_mode='Markdown',
+            "❌ Invalid format. Please try again.",
             reply_markup=cancel_keyboard()
         )
-        return AWAIT_RETURN
+        return AWAIT_LEND_AMOUNT
 
 # ========== Quick Text Commands ==========
 
@@ -556,16 +674,17 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.lower().strip()
     
     try:
-        # Quick salary
-        if text.startswith('salary'):
-            amount = float(text.split('salary')[1].strip())
-            db.record_salary(user_id, amount)
+        if text.startswith('income'):
+            parts = text.split('income')[1].strip().split(None, 2)
+            amount = float(parts[0])
+            category = parts[1] if len(parts) > 1 else 'other'
+            description = parts[2] if len(parts) > 2 else ''
+            db.record_income(user_id, amount, category, description)
             await update.message.reply_text(
-                f"✅ Salary: ₹{amount:,.2f} credited!",
+                f"✅ Income: ₹{amount:,.2f} ({category}) recorded!",
                 reply_markup=main_keyboard()
             )
         
-        # Quick spend
         elif text.startswith('spend'):
             parts = text.split('spend')[1].strip().split(None, 2)
             amount = float(parts[0])
@@ -577,21 +696,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=main_keyboard()
             )
         
-        # Quick save
-        elif text.startswith('save'):
-            amount = float(text.split('save')[1].strip())
-            db.record_savings(user_id, amount)
-            await update.message.reply_text(
-                f"✅ Savings: ₹{amount:,.2f} added!",
-                reply_markup=main_keyboard()
-            )
-        
         else:
             await update.message.reply_text(
                 "❌ Unknown command. Use buttons or:\n"
-                "• `salary 50000`\n"
-                "• `spend 500 food lunch`\n"
-                "• `save 5000`",
+                "• `income 50000 salary`\n"
+                "• `spend 500 food lunch`",
                 reply_markup=main_keyboard()
             )
     
@@ -601,6 +710,30 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "❌ Invalid format. Use buttons for guided input.",
             reply_markup=main_keyboard()
         )
+
+# ========== Automated Daily Report ==========
+
+async def send_daily_reports(application: Application):
+    """Send yesterday's report to all users at 6 AM."""
+    logger.info("Starting daily report distribution...")
+    
+    user_ids = db.get_users_for_daily_report()
+    
+    for user_id in user_ids:
+        try:
+            report = db.get_yesterday_report(user_id)
+            
+            await application.bot.send_message(
+                chat_id=user_id,
+                text=f"🌅 *Good Morning!*\n\n{report}",
+                parse_mode='Markdown',
+                reply_markup=main_keyboard()
+            )
+            logger.info(f"Daily report sent to user {user_id}")
+        except Exception as e:
+            logger.error(f"Failed to send report to user {user_id}: {e}")
+    
+    logger.info(f"Daily reports sent to {len(user_ids)} users")
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Log errors."""
@@ -613,14 +746,14 @@ def main():
     token = os.getenv('TELEGRAM_BOT_TOKEN')
     
     if not token:
-        raise ValueError("❌ TELEGRAM_BOT_TOKEN not found in environment variables!")
+        raise ValueError("❌ TELEGRAM_BOT_TOKEN not found!")
     
     app = Application.builder().token(token).build()
+        # ========== Conversation Handlers ==========
     
-    # Conversation handlers with separate entry points
-    salary_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(start_salary_entry, pattern="^add_salary$")],
-        states={AWAIT_SALARY: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_salary)]},
+    income_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(start_income_entry, pattern="^add_income$")],
+        states={AWAIT_INCOME: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_income)]},
         fallbacks=[CallbackQueryHandler(cancel_operation, pattern="^main_menu$")],
         allow_reentry=True
     )
@@ -632,30 +765,16 @@ def main():
         allow_reentry=True
     )
     
-    savings_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(start_savings_entry, pattern="^add_savings$")],
-        states={AWAIT_SAVINGS: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_savings)]},
-        fallbacks=[CallbackQueryHandler(cancel_operation, pattern="^main_menu$")],
-        allow_reentry=True
-    )
-    
     borrow_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(start_borrow_entry, pattern="^borrowed$")],
-        states={AWAIT_BORROW: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_borrow)]},
+        entry_points=[CallbackQueryHandler(start_borrowed_entry, pattern="^borrowed_money$")],
+        states={AWAIT_BORROW_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_borrow)]},
         fallbacks=[CallbackQueryHandler(cancel_operation, pattern="^main_menu$")],
         allow_reentry=True
     )
     
     lend_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(start_lend_entry, pattern="^lent$")],
-        states={AWAIT_LEND: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_lent)]},
-        fallbacks=[CallbackQueryHandler(cancel_operation, pattern="^main_menu$")],
-        allow_reentry=True
-    )
-    
-    return_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(start_return_entry, pattern="^returned$")],
-        states={AWAIT_RETURN: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_returned)]},
+        entry_points=[CallbackQueryHandler(start_lent_entry, pattern="^lent_money$")],
+        states={AWAIT_LEND_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_lend)]},
         fallbacks=[CallbackQueryHandler(cancel_operation, pattern="^main_menu$")],
         allow_reentry=True
     )
@@ -664,24 +783,42 @@ def main():
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("help", help_command))
     
-    # Add conversation handlers BEFORE the general callback handler
-    app.add_handler(salary_conv)
+    # Conversation handlers
+    app.add_handler(income_conv)
     app.add_handler(expense_conv)
-    app.add_handler(savings_conv)
     app.add_handler(borrow_conv)
     app.add_handler(lend_conv)
-    app.add_handler(return_conv)
     
-    # General callback handler (for non-conversation buttons)
+    # Special handlers for money received/returned
+    app.add_handler(CallbackQueryHandler(handle_money_received, pattern="^money_received$"))
+    app.add_handler(CallbackQueryHandler(handle_money_returned, pattern="^money_returned$"))
+    
+    # General callback handler
     app.add_handler(CallbackQueryHandler(button_callback))
     
-    # Text handler for quick commands
+    # Text handler
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     
     # Error handler
     app.add_error_handler(error_handler)
     
-    logger.info("🚀 Finance Tracker Bot Started Successfully!")
+    # ========== Setup Daily Report Scheduler ==========
+    
+    # Schedule daily report at 6:00 AM IST
+    scheduler.add_job(
+        send_daily_reports,
+        CronTrigger(hour=6, minute=0, timezone='Asia/Kolkata'),
+        args=[app],
+        id='daily_report',
+        name='Send Yesterday Report',
+        replace_existing=True
+    )
+    
+    scheduler.start()
+    logger.info("📅 Daily report scheduler started (6:00 AM IST)")
+    
+    # Start bot
+    logger.info("🚀 Advanced Finance Tracker Bot Started Successfully!")
     app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
 
 if __name__ == '__main__':
