@@ -1,44 +1,62 @@
-# 💰 Telegram Salary Tracker Bot
+# 💰 Advanced Finance Tracker Bot
 
-A simple and efficient Telegram bot to track your salary, expenses, and savings.
+A comprehensive Telegram bot for personal finance management with automated daily reports.
 
-## 🚀 Features
+## ✨ Features
 
-- ✅ Track salary credits
-- ✅ Record daily expenses with notes
-- ✅ Track savings
-- ✅ Automatic date tracking
-- ✅ Today's summary report
-- ✅ Monthly summary report with savings rate
-- ✅ SQLite database (persistent storage)
-- ✅ Multi-user support
+### 💰 Income Tracking
+- Record multiple income sources (salary, freelance, business, etc.)
+- Categorized income management
+- Income summary reports
 
-## 📝 Commands
+### 💸 Expense Management
+- Track expenses by category
+- 8 predefined categories: Food, Transport, Bills, Shopping, Health, Entertainment, Education, Other
+- Detailed expense analysis
+- Category-wise breakdown
 
-- `salary credited <amount>` - Record salary
-- `spend <amount> [note]` - Record expense
-- `credit savings <amount>` - Record savings
-- `today report` - View today's summary
-- `month report` - View monthly summary
-- `help` - Show help message
+### 🤝 Borrow & Lend System
+- **Borrowed Money**: Record money you borrowed from others
+- **Lent Money**: Track money you lent to friends
+- **Money Received**: Mark when borrowed money is returned to you
+- **Money Returned**: Mark when you return borrowed money
+- Complete status tracking (Pending/Settled)
+- Person-wise detailed reports
 
-## 🛠️ Local Setup
+### 📊 Advanced Statements
+- **Monthly Statement**: Complete month overview with category breakdown
+- **Custom Date Range**: Filter by specific dates
+- **Borrow & Lend Statement**: Detailed loan reports
+  - Total borrowed (pending & settled)
+  - Total lent (pending & settled)
+  - Person-wise breakdown
+- **Expense Category Report**: Category-wise spending analysis
+- **Income Summary**: All income sources overview
+- **Net Balance Report**: Overall financial position
 
+### 📬 Automated Daily Reports
+- Automatically sends yesterday's report every morning at **6:00 AM**
+- Includes:
+  - Total income
+  - Total expenses
+  - Category-wise expense breakdown
+  - Net balance
+
+### ⚙️ Settings
+- Enable/disable daily reports
+- Reset all data option
+- User-specific configurations
+
+## 🚀 Quick Start
+
+### Prerequisites
+- Python 3.8+
+- Telegram Bot Token (from @BotFather)
+- Railway/Render/Heroku account for deployment
+
+### Installation
+
+1. **Clone the repository**
 ```bash
-# Clone repository
-git clone https://github.com/yourusername/salary-tracker-bot.git
-cd salary-tracker-bot
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Create .env file
-cp .env.example .env
-# Edit .env and add your TELEGRAM_BOT_TOKEN
-
-# Run bot
-python bot.py
+git clone <your-repo-url>
+cd finance-tracker-bot
