@@ -740,10 +740,34 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         
         else:
+                    elif text in ['statement', 'mini statement', 'show statement', 'st']:
+            statement = db.get_last_30_days_statement(user_id)
+            
+            # Handle long messages
+            if len(statement) > 4000:
+                chunks = [statement[i:i+4000] for i in range(0, len(statement), 4000)]
+                for chunk in chunks:
+                    await update.message.reply_text(
+                        chunk,
+                        parse_mode='Markdown'
+                    )
+                await update.message.reply_text(
+                    "📝 Statement complete!",
+                    reply_markup=main_keyboard()
+                )
+            else:
+                await update.message.reply_text(
+                    statement,
+                    parse_mode='Markdown',
+                    reply_markup=main_keyboard()
+                )
+        
+        else:
             await update.message.reply_text(
                 "❌ Unknown command. Use buttons or:\n"
                 "• `income 50000 salary`\n"
-                "• `spend 500 food lunch`",
+                "• `spend 500 food lunch`\n"
+                "• `statement` - Show mini statement",
                 reply_markup=main_keyboard()
             )
     
