@@ -438,7 +438,47 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                        reply_markup=InlineKeyboardMarkup([[
                                            InlineKeyboardButton("🔙 Back", callback_data="bl_statement")
                                        ]]))
-    
+            # Mini Statement
+    elif action == "mini_statement":
+        await query.message.edit_text(
+            "⏳ *Generating Mini Statement...*\n\nPlease wait...",
+            parse_mode='Markdown'
+        )
+        
+        try:
+            statement = db.get_last_30_days_statement(user_id)
+            
+            # Split into chunks if too long (Telegram limit: 4096 chars)
+            max_length = 4000
+            if len(statement) > max_length:
+                chunks = [statement[i:i+max_length] for i in range(0, len(statement), max_length)]
+                
+                for i, chunk in enumerate(chunks):
+                    if i == 0:
+                        await query.message.edit_text(
+                            chunk,
+                            parse_mode='Markdown',
+                            reply_markup=back_to_menu() if i == len(chunks)-1 else None
+                        )
+                    else:
+                        await query.message.reply_text(
+                            chunk,
+                            parse_mode='Markdown',
+                            reply_markup=back_to_menu() if i == len(chunks)-1 else None
+                        )
+            else:
+                await query.message.edit_text(
+                    statement,
+                    parse_mode='Markdown',
+                    reply_markup=back_to_menu()
+                )
+        except Exception as e:
+            logger.error(f"Mini statement error: {e}")
+            await query.message.edit_text(
+                "❌ Error generating statement. Please try again.",
+                parse_mode='Markdown',
+                reply_markup=back_to_menu()
+            )
     # Settings
     elif action == "toggle_daily_report":
         db.update_user_settings(user_id, True)
