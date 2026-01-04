@@ -30,19 +30,18 @@ wheels/
 
 # Environment
 .env
+.venv
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
-*.sublime-project
-*.sublime-workspace
+*~
 
 # OS
 .DS_Store
 Thumbs.db
-# In your project folder
-git add .
-git commit -m "Add inline buttons and new features"
-git push
+
+# Logs
+*.log
