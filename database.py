@@ -468,3 +468,92 @@ class Database:
             conn.execute('DELETE FROM transactions WHERE user_id = ?', (user_id,))
             conn.execute('DELETE FROM debt_tracking WHERE user_id = ?', (user_id,))
             conn.execute('DELETE FROM user_settings WHERE user_id = ?', (user_id,))
+            def get_last_30_days_statement(self, user_id: int) -> str:
+    """Get last 30 days mini statement with all transactions."""
+    from datetime import timedelta
+    
+    cutoff_date = (datetime.now() - timedelta(days=30)).date()
+    
+    with self.get_connection() as conn:
+        cursor = conn.execute('''
+            SELECT trans_type, amount, category, description, created_at
+            FROM transactions
+            WHERE user_id = ? AND DATE(created_at) >= ?
+            ORDER BY created_at DESC
+            LIMIT 50
+        ''', (user_id, cutoff_date))
+        
+        transactions = cursor.fetchall()
+    
+    if not transactions:
+        return "📝 *Mini Statement (Last 30 Days)*\n\n❌ No transactions found in the last 30 days."
+    
+    report = f"📝 *Mini Statement*\n_Last 30 Days Activity_\n\n"
+    
+    type_icons = {
+        'income': '💰',
+        'expense': '💸'
+    }
+    
+    category_icons = {
+        'salary': '💰', 'freelance': '💼', 'business': '🏢',
+        'investment': '📈', 'bonus': '🎁',
+        'food': '🍔', 'transport': '🚗', 'bills': '🏠',
+        'shopping': '🛍️', 'health': '💊', 'entertainment': '🎬',
+        'education': '📚', 'other': '📦'
+    }
+    
+    # Group by date
+    from collections import defaultdict
+    by_date = defaultdict(list)
+    
+    for trans in transactions:
+        trans_date = datetime.strptime(trans['created_at'], '%Y-%m-%d %H:%M:%S')
+        date_key = trans_date.strftime('%Y-%m-%d')
+        by_date[date_key].append(trans)
+    
+    # Generate report
+    total_income = 0
+    total_expense = 0
+    
+    for date_key in sorted(by_date.keys(), reverse=True):
+        date_obj = datetime.strptime(date_key, '%Y-%m-%d')
+        report += f"\n📅 *{date_obj.strftime('%d %b %Y (%A)')}*\n"
+        report += f"{'─' * 30}\n"
+        
+        day_income = 0
+        day_expense = 0
+        
+        for trans in by_date[date_key]:
+            trans_time = datetime.strptime(trans['created_at'], '%Y-%m-%d %H:%M:%S')
+            icon = type_icons.get(trans['trans_type'], '💵')
+            cat_icon = category_icons.get(trans['category'], '📦')
+            
+            if trans['trans_type'] == 'income':
+                day_income += trans['amount']
+                total_income += trans['amount']
+                symbol = "+"
+            else:
+                day_expense += trans['amount']
+                total_expense += trans['amount']
+                symbol = "-"
+            
+            category_text = f" ({trans['category']})" if trans['category'] else ""
+            desc_text = f" - {trans['description']}" if trans['description'] else ""
+            
+            report += f"{cat_icon} {symbol}₹{trans['amount']:,.2f}{category_text}{desc_text}\n"
+            report += f"   _{trans_time.strftime('%I:%M %p')}_\n"
+        
+        # Day summary
+        day_net = day_income - day_expense
+        report += f"\n💵 Day Total: +₹{day_income:,.2f} | -₹{day_expense:,.2f} | Net: ₹{day_net:,.2f}\n\n"
+    
+    # Overall summary
+    net_balance = total_income - total_expense
+    report += f"{'━' * 30}\n\n"
+    report += f"📊 *30-Day Summary*\n"
+    report += f"💰 Total Income: ₹{total_income:,.2f}\n"
+    report += f"💸 Total Expenses: ₹{total_expense:,.2f}\n"
+    report += f"💵 Net Balance: ₹{net_balance:,.2f}"
+    
+    return report.strip()
