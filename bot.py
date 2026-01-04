@@ -38,7 +38,10 @@ def main_keyboard():
             InlineKeyboardButton("📊 Statements", callback_data="menu_statements")
         ],
         [
-            InlineKeyboardButton("⚙️ Settings", callback_data="menu_settings"),
+            InlineKeyboardButton("📝 Mini Statement", callback_data="mini_statement"),
+            InlineKeyboardButton("⚙️ Settings", callback_data="menu_settings")
+        ],
+        [
             InlineKeyboardButton("❓ Help", callback_data="show_help")
         ]
     ])
